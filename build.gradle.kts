@@ -19,12 +19,12 @@ val gitCommitCount = "git rev-list HEAD --count".execute().toInt()
 val gitCommitHash = "git rev-parse --verify --short HEAD".execute()
 
 // also the soname
-val moduleId by extra("sample")
-val moduleName by extra("Zygisk Module Sample")
+val moduleId by extra("mxg_charge")
+val moduleName by extra("MxG - Charging Injection")
 val verName by extra("v1")
 val verCode by extra(gitCommitCount)
 val commitHash by extra(gitCommitHash)
-val abiList by extra(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
+val abiList by extra(listOf("arm64-v8a", "armeabi-v7a"))
 
 val androidMinSdkVersion by extra(26)
 val androidTargetSdkVersion by extra(34)
@@ -40,7 +40,7 @@ tasks.register("Delete", Delete::class) {
 
 fun Project.configureBaseExtension() {
     extensions.findByType(AppExtension::class)?.run {
-        namespace = "io.github.a13e300.zygisk.module.sample"
+        namespace = "io.github.justin-a30.mxg.charge"
         compileSdkVersion(androidCompileSdkVersion)
         ndkVersion = androidCompileNdkVersion
         buildToolsVersion = androidBuildToolsVersion

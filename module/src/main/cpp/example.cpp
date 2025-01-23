@@ -1,79 +1,66 @@
-/* Copyright 2022-2023 John "topjohnwu" Wu
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
- * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
- * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
- * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
- * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
- * PERFORMANCE OF THIS SOFTWARE.
- */
-
-#include <cstdlib>
-#include <unistd.h>
-#include <fcntl.h>
+#include <jni.h>
 #include <android/log.h>
-
 #include "zygisk.hpp"
 
-using zygisk::Api;
-using zygisk::AppSpecializeArgs;
-using zygisk::ServerSpecializeArgs;
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "WaveCharge", __VA_ARGS__)
 
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "MyModule", __VA_ARGS__)
-
-class MyModule : public zygisk::ModuleBase {
+class WaveCharge : public zygisk::ModuleBase {
 public:
     void onLoad(Api *api, JNIEnv *env) override {
         this->api = api;
         this->env = env;
-    }
 
-    void preAppSpecialize(AppSpecializeArgs *args) override {
-        // Use JNI to fetch our process name
-        const char *process = env->GetStringUTFChars(args->nice_name, nullptr);
-        preSpecialize(process);
-        env->ReleaseStringUTFChars(args->nice_name, process);
-    }
-
-    void preServerSpecialize(ServerSpecializeArgs *args) override {
-        preSpecialize("system_server");
+        // Hook the methods
+        hookSupportWaveChargeAnimation();
+        hookUpdateWaveHeight();
     }
 
 private:
     Api *api;
     JNIEnv *env;
 
-    void preSpecialize(const char *process) {
-        // Demonstrate connecting to to companion process
-        // We ask the companion for a random number
-        unsigned r = 0;
-        int fd = api->connectCompanion();
-        read(fd, &r, sizeof(r));
-        close(fd);
-        LOGD("process=[%s], r=[%u]\n", process, r);
-
-        // Since we do not hook any functions, we should let Zygisk dlclose ourselves
-        api->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
+    void hookSupportWaveChargeAnimation() {
+        JNINativeMethod methods[] = {
+                {"supportWaveChargeAnimation", "()Z", (void *) supportWaveChargeAnimation}
+        };
+        api->hookJniNativeMethods(env, "com/android/keyguard/charge/ChargeUtils", methods, 1);
     }
 
+    void hookUpdateWaveHeight() {
+        JNINativeMethod methods[] = {
+                {"updateWaveHeight", "()V", (void *) updateWaveHeight}
+        };
+        api->hookJniNativeMethods(env, "com/android/keyguard/charge/wave/WaveView", methods, 1);
+    }
+
+    static jboolean supportWaveChargeAnimation(JNIEnv *env, jobject thiz) {
+        jclass cls = env->FindClass("java/lang/Throwable");
+        jobject throwable = env->NewObject(cls, env->GetMethodID(cls, "<init>", "()V"));
+        jobjectArray stackTrace = (jobjectArray) env->CallObjectMethod(throwable, env->GetMethodID(cls, "getStackTrace", "()[Ljava/lang/StackTraceElement;"));
+
+        jsize length = env->GetArrayLength(stackTrace);
+        for (jsize i = 0; i < length; ++i) {
+            jobject element = env->GetObjectArrayElement(stackTrace, i);
+            jclass elementClass = env->GetObjectClass(element);
+            jmethodID getClassName = env->GetMethodID(elementClass, "getClassName", "()Ljava/lang/String;");
+            jstring className = (jstring) env->CallObjectMethod(element, getClassName);
+
+            const char *classNameCStr = env->GetStringUTFChars(className, nullptr);
+            if (strcmp(classNameCStr, "com.android.keyguard.charge.ChargeUtils") == 0 ||
+                strcmp(classNameCStr, "com.android.keyguard.charge.container.MiuiChargeContainerView") == 0) {
+                env->ReleaseStringUTFChars(className, classNameCStr);
+                return JNI_TRUE;
+            }
+            env->ReleaseStringUTFChars(className, classNameCStr);
+        }
+        return JNI_FALSE;
+    }
+
+    static void updateWaveHeight(JNIEnv *env, jobject thiz) {
+        jclass cls = env->GetObjectClass(thiz);
+        jfieldID fieldID = env->GetFieldID(cls, "mWaveXOffset", "I");
+        env->SetIntField(thiz, fieldID, 0);
+    }
 };
 
-static int urandom = -1;
-
-static void companion_handler(int i) {
-    if (urandom < 0) {
-        urandom = open("/dev/urandom", O_RDONLY);
-    }
-    unsigned r;
-    read(urandom, &r, sizeof(r));
-    LOGD("companion r=[%u]\n", r);
-    write(i, &r, sizeof(r));
-}
-
-// Register our module class and the companion handler function
-REGISTER_ZYGISK_MODULE(MyModule)
-REGISTER_ZYGISK_COMPANION(companion_handler)
+REGISTER_ZYGISK_MODULE(WaveCharge)
